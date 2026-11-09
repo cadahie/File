@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trình Chuyển Đổi Định Dạng Video Trực Tiếp Trên Trình Duyệt</title>
+    <!-- Sử dụng phiên bản ổn định tích hợp sẵn qua CDN cdnjs -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ffmpeg/0.11.6/ffmpeg.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 40px auto;
+            padding: 20px;
+            background-color: #f4f4f9;
+            color: #333;
+        }
+        .container {
+            background: #fff;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        h2 { text-align: center; color: #007bff; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input, select, button {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #28a745;
+            color: white;
+            font-size: 16px;
+            border: none;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        button:hover { background-color: #218838; }
+        button:disabled { background-color: #cccccc; cursor: not-allowed; }
+        #status {
+            margin-top: 15px;
+            font-style: italic;
+            color: #555;
+            text-align: center;
+        }
+        #downloadArea {
+            margin-top: 20px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Trình Chuyển Đổi Video (WebAssembly)</h2>
+    
+    <div class="form-group">
+        <label for="uploader">Chọn file video:</label>
+        <input type="file" id="uploader" accept="video/*">
+    </div>
+
+    <div class="form-group">
+        <label for="outputFileNameInput">Tên tệp khi xuất ra (không cần gõ phần mở rộng):</label>
+        <input type="text" id="outputFileNameInput" value="ket_qua" placeholder="Nhập tên tệp mới...">
+    </div>
+
+    <div class="form-group">
+        <label for="outputFormat">Chọn định dạng muốn chuyển sang:</label>
+        <select id="outputFormat">
+            <option value="mp4">MP4 (Video)</option>
+            <option value="webm">WebM (Video)</option>
+            <option value="avi">AVI (Video)</option>
+            <option value="mp3">MP3 (Chỉ lấy âm thanh)</option>
+            <option value="gif">GIF (Ảnh động)</option>
+        </select>
+    </div>
+
+    <button id="startBtn" disabled>Bắt đầu chuyển đổi</button>
+
+    <p id="status">Đang khởi tạo hệ thống...</p>
+    
+    <div id="downloadArea"></div>
+</div>
+
+<script>
+    const { createFFmpeg, fetchFile } = FFmpeg;
+    let ffmpeg = null;
+
+    const uploader = document.getElementById('uploader');
+    const outputFileNameInput = document.getElementById('outputFileNameInput');
+    const outputFormat = document.getElementById('outputFormat');
+    const startBtn = document.getElementById('startBtn');
+    const status = document.getElementById('status');
+    const downloadArea = document.getElementById('downloadArea');
+
+    // Tự động điền tên mặc định theo tên file gốc
+    uploader.addEventListener('change', () => {
+        if (uploader.files.length > 0) {
+            let originalName = uploader.files[0].name;
+            let baseName = originalName.substring(0, originalName.lastIndexOf('.')) || originalName;
+            outputFileNameInput.value = baseName + "_converted";
+        }
+    });
+
+    // Khởi tạo FFmpeg phiên bản 0.11.x ổn định trên di động
+    async function initFFmpeg() {
+        try {
+            ffmpeg = createFFmpeg({ log: true });
+            status.innerText = 'Đang tải bộ xử lý (Có thể mất vài giây)...';
+            
+            await ffmpeg.load();
+            
+            status.innerText = 'Sẵn sàng! Hãy chọn file video để bắt đầu.';
+            startBtn.disabled = false;
+        } catch (error) {
+            console.error(error);
+            status.innerText = 'Không thể tải bộ xử lý. Hãy kiểm tra kết nối mạng hoặc thử lại bằng trình duyệt khác.';
+        }
+    }
+
+    initFFmpeg();
+
+    // Xử lý chuyển đổi
+    startBtn.addEventListener('click', async () => {
+        if (!uploader.files.length) return;
+
+        const file = uploader.files[0];
+        const targetFormat = outputFormat.value;
+        
+        let customName = outputFileNameInput.value.trim();
+        if (!customName) customName = 'ket_qua';
+
+        const inputFileName = 'input_file' + file.name.substring(file.name.lastIndexOf('.'));
+        const outputFileName = `output.${targetFormat}`;
+        const finalDownloadName = `${customName}.${targetFormat}`;
+
+        startBtn.disabled = true;
+        uploader.disabled = true;
+        outputFileNameInput.disabled = true;
+        downloadArea.innerHTML = '';
+
+        try {
+            status.innerText = 'Đang đọc file...';
+            ffmpeg.FS('writeFile', inputFileName, await fetchFile(file));
+
+            status.innerText = 'Đang chuyển đổi định dạng, vui lòng đợi...';
+            
+            if (targetFormat === 'mp3') {
+                await ffmpeg.run('-i', inputFileName, '-q:a', '0', outputFileName);
+            } else if (targetFormat === 'gif') {
+                await ffmpeg.run('-i', inputFileName, '-vf', 'fps=10,scale=320:-1:flags=lanczos', outputFileName);
+            } else {
+                await ffmpeg.run('-i', inputFileName, outputFileName);
+            }
+
+            status.innerText = 'Chuyển đổi thành công!';
+
+            const data = ffmpeg.FS('readFile', outputFileName);
+            const blob = new Blob([data.buffer], { 
+                type: targetFormat === 'mp3' ? 'audio/mp3' : (targetFormat === 'gif' ? 'image/gif' : 'video/' + targetFormat) 
+            });
+            const url = URL.createObjectURL(blob);
+
+            const downloadLink = document.createElement('a');
+            downloadLink.href = url;
+            downloadLink.download = finalDownloadName;
+            downloadLink.innerText = `Tải xuống tệp: ${finalDownloadName}`;
+            downloadLink.style.display = 'inline-block';
+            downloadLink.style.padding = '10px 20px';
+            downloadLink.style.backgroundColor = '#007bff';
+            downloadLink.style.color = 'white';
+            downloadLink.style.textDecoration = 'none';
+            downloadLink.style.borderRadius = '4px';
+            
+            downloadArea.appendChild(downloadLink);
+
+        } catch (error) {
+            console.error(error);
+            status.innerText = 'Có lỗi xảy ra trong quá trình xử lý tệp!';
+        } finally {
+            startBtn.disabled = false;
+            uploader.disabled = false;
+            outputFileNameInput.disabled = false;
+        }
+    });
+</script>
+
+</body>
+</html>
